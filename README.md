@@ -13,6 +13,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?style=flat-square&logo=python&logoColor=white)](#环境要求)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6.svg?style=flat-square&logo=windows11&logoColor=white)](#环境要求)
 [![Stars](https://img.shields.io/github/stars/SrQingChen/QingSuo?style=flat-square&color=00838F&label=Stars)](https://github.com/SrQingChen/QingSuo/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/SrQingChen/QingSuo/total?style=flat-square&color=0E9F8F&label=Downloads)](https://github.com/SrQingChen/QingSuo/releases)
 
 [![OCR](https://img.shields.io/badge/OCR-PP--OCRv5-0E9F8F.svg?style=flat-square)]()
 [![Runtime](https://img.shields.io/badge/Runtime-ONNX%20Runtime-005CED.svg?style=flat-square&logo=onnx&logoColor=white)]()
@@ -59,6 +60,12 @@
 ---
 
 ## 🚀 快速开始
+
+### 0. 免安装版（Windows，不想配环境走这条）
+
+[**⬇️ 下载 QingSuo-1.0.0-win64.zip**](https://github.com/SrQingChen/QingSuo/releases/latest)（约 265MB）
+——解压后双击 `QingSuo.exe` 即用，**已内置两档 OCR 模型，无需 Python 环境**；
+仍需 FFmpeg 在 `PATH` 中（见下）。想从源码运行见第 1 步起。
 
 ### 环境要求
 
@@ -262,6 +269,25 @@ models/                # PP-OCRv5 ONNX 权重
 | `GET` | `/api/scan?input_dir=` | 预扫描目录 |
 | `GET` | `/api/monitor` | 性能快照 + 历史曲线数据 |
 | `GET` | `/api/events` | 事件流（内存环形缓冲 + 文件双写） |
+
+---
+
+## 📦 自行打包
+
+想自己构建 Windows 免安装版：
+
+```bash
+pip install pyinstaller
+pyinstaller --clean --noconfirm QingSuo.spec
+```
+
+产物在 `dist/QingSuo/`，双击 `QingSuo.exe` 即用。
+
+构建配置（`QingSuo.spec`）里有两个刻意的选择：**用 onedir 而非 onefile**（包内含
+onnxruntime/opencv 原生库与 OCR 权重，onefile 每次启动都要把上百 MB 解压到临时目录，
+冷启动慢到无法接受），以及**禁用 UPX**（它会破坏 onnxruntime/opencv 的 DLL）。
+另外 uvicorn 的协议/事件循环/生命周期模块全是字符串动态导入，必须逐个列进 `hiddenimports`，
+否则打出来的包能启动、一访问就 500。
 
 ---
 
