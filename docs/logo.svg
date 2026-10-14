@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="青梭 QingSuo">
+  <title>青梭 QingSuo — 基于 OCR 的智能素材剪辑器</title>
+  <defs>
+    <linearGradient id="qs-ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F8CFF"/>
+      <stop offset="0.55" stop-color="#0E9F8F"/>
+      <stop offset="1" stop-color="#3DDC97"/>
+    </linearGradient>
+    <linearGradient id="qs-shuttle" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3DDC97"/>
+      <stop offset="1" stop-color="#0E9F8F"/>
+    </linearGradient>
+    <radialGradient id="qs-glow" cx="0.5" cy="0.44" r="0.62">
+      <stop offset="0" stop-color="#0E9F8F" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#0E9F8F" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="qs-clip"><rect x="8" y="8" width="240" height="240" rx="60"/></clipPath>
+  </defs>
+
+  <rect x="8" y="8" width="240" height="240" rx="60" fill="#0F1115"/>
+  <rect x="8" y="8" width="240" height="240" rx="60" fill="url(#qs-glow)"/>
+  <rect x="9.5" y="9.5" width="237" height="237" rx="58.5" fill="none"
+        stroke="url(#qs-ring)" stroke-width="3"/>
+
+  <g clip-path="url(#qs-clip)">
+    <path d="M22 128 H52" stroke="#3DDC97" stroke-opacity="0.5" stroke-width="4" stroke-linecap="round"/>
+    <path d="M204 128 H234" stroke="#3DDC97" stroke-opacity="0.5" stroke-width="4" stroke-linecap="round"/>
+  </g>
+
+  <path d="M52 128 C 76 100 100 86 128 86 C 156 86 180 100 204 128
+           C 180 156 156 170 128 170 C 100 170 76 156 52 128 Z"
+        fill="url(#qs-shuttle)" fill-opacity="0.16"
+        stroke="url(#qs-shuttle)" stroke-width="4" stroke-linejoin="round"/>
+
+  <path d="M114 106 L154 128 L114 150 Z" fill="#3DDC97"/>
+</svg>

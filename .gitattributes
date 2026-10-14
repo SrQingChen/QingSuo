@@ -1,0 +1,15 @@
+# ONNX 权重为二进制，禁止行尾转换
+*.onnx binary
+*.png binary
+*.jpg binary
+*.mp4 binary
+
+# 文本文件统一 LF
+*.py text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.yml text eol=lf
+*.bat text eol=crlf
+
+# 折叠 diff 噪音
+docs/*.svg linguist-documentation

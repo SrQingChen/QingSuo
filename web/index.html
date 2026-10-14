@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>青梭 · 基于 OCR 的智能素材剪辑器</title>
+<style>
+:root {
+  --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --border: #2a2f3a;
+  --text: #e4e7ee; --muted: #8b93a3; --accent: #4f8cff; --accent2: #3ddc97;
+  --warn: #f0b429; --err: #ff6b6b; --radius: 10px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 14px;
+  display: grid; grid-template-columns: 380px 1fr; grid-template-rows: auto 1fr;
+  height: 100vh; overflow: hidden;
+}
+header {
+  grid-column: 1 / 3; display: flex; align-items: center; gap: 14px;
+  padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+header h1 { font-size: 18px; font-weight: 600; }
+header .logo { width: 26px; height: 26px; border-radius: 7px; display: block; }
+#dev-chips { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.chip { padding: 3px 10px; border-radius: 20px; font-size: 12px;
+  background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+.chip.on { color: var(--accent2); border-color: var(--accent2); }
+
+aside {
+  background: var(--panel); border-right: 1px solid var(--border);
+  padding: 16px; overflow-y: auto;
+}
+section { margin-bottom: 22px; }
+section h2 { font-size: 13px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1px; margin-bottom: 10px; }
+label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 13px; }
+input[type=text], input[type=number], select {
+  width: 100%; padding: 8px 10px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--panel2); color: var(--text);
+}
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+.row { display: flex; gap: 8px; }
+.row > * { flex: 1; }
+.hint { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.btn {
+  padding: 9px 14px; border: none; border-radius: var(--radius); cursor: pointer;
+  font-size: 14px; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--border); transition: all .15s;
+}
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: #fff; font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.15); }
+.btn.danger { color: var(--err); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.wide { width: 100%; margin-top: 12px; }
+.toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0;
+  color: var(--text); font-size: 13px; cursor: pointer; user-select: none; }
+.toggle input { accent-color: var(--accent); }
+.adv-details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+
+main { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; }
+.card h3 { font-size: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.status { font-size: 12px; padding: 2px 8px; border-radius: 12px; }
+.status.running { background: #24344d; color: var(--accent); }
+.status.done { background: #16352a; color: var(--accent2); }
+.status.failed { background: #3d2020; color: var(--err); }
+.status.cancelled, .status.skipped { background: #333; color: var(--muted); }
+.progressbar { height: 8px; border-radius: 4px; background: var(--panel2);
+  overflow: hidden; margin: 8px 0; }
+.progressbar > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+  transition: width .5s; }
+.filelist { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.fileitem { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  background: var(--panel2); border-radius: 8px; font-size: 13px; }
+.fileitem .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fileitem .ocr-text { color: var(--muted); font-size: 12px; max-width: 300px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+.seg-table th, .seg-table td { text-align: left; padding: 5px 8px;
+  border-bottom: 1px solid var(--border); color: var(--text); }
+.seg-table th { color: var(--muted); font-weight: normal; }
+
+.monitor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.metric { background: var(--panel2); border-radius: 8px; padding: 12px; }
+.metric .label { font-size: 12px; color: var(--muted); }
+.metric .value { font-size: 22px; font-weight: 600; margin: 4px 0; }
+.metric canvas { width: 100%; height: 36px; display: block; }
+.spark-bar { height: 4px; background: var(--border); border-radius: 2px; margin-top: 8px; }
+.spark-bar > div { height: 100%; border-radius: 2px; background: var(--accent); }
+
+#eventlog { font-family: Consolas, monospace; font-size: 12px; max-height: 200px;
+  overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+#eventlog .ev { display: flex; gap: 8px; padding: 3px 6px; border-radius: 4px; }
+#eventlog .ev .t { color: var(--muted); }
+#eventlog .ev.warn { color: var(--warn); }
+#eventlog .ev.error { color: var(--err); }
+#eventlog .ev.success { color: var(--accent2); }
+.empty { color: var(--muted); text-align: center; padding: 30px; }
+#toast { position: fixed; bottom: 24px; right: 24px; background: var(--panel2);
+  border: 1px solid var(--accent); padding: 12px 18px; border-radius: 8px;
+  display: none; z-index: 100; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
+</style>
+</head>
+<body>
+<header>
+  <img class="logo" src="/logo.svg" alt="青梭">
+  <h1>青梭 <span style="color:var(--muted);font-size:12px;font-weight:normal">基于 OCR 的智能素材剪辑器</span></h1>
+  <div id="dev-chips"></div>
+</header>
+
+<aside>
+  <section>
+    <h2>剪辑任务</h2>
+    <label>输入目录（支持目录级导入）</label>
+    <input type="text" id="input-dir" placeholder="E:\videos">
+    <div class="hint" id="scan-hint">填写后自动扫描</div>
+
+    <label>输出目录</label>
+    <input type="text" id="output-dir" placeholder="E:\clips">
+
+    <label>匹配关键词（逗号分隔，含任一即命中）</label>
+    <input type="text" id="keywords" placeholder="锁暝">
+
+    <label>OCR 模型档位</label>
+    <select id="ocr-level"></select>
+    <div class="hint" id="level-note"></div>
+
+    <details class="adv-details">
+      <summary>高级参数</summary>
+      <div class="row">
+        <div><label>采样帧率 (fps)</label><input type="number" id="sample-fps" value="2" min="0.2" max="10" step="0.5"></div>
+        <div><label>前后余量 (秒)</label><input type="number" id="margin" value="0.5" min="0" step="0.1"></div>
+      </div>
+      <div class="row">
+        <div><label>合并间隔 (秒)</label><input type="number" id="merge-gap" value="1" min="0" step="0.5"></div>
+        <div><label>匹配方式</label>
+          <select id="match-mode"><option value="plain">精确包含</option><option value="regex">正则表达式</option></select>
+        </div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="ignore-case" checked> 忽略大小写（英文）</label>
+      <label class="toggle"><input type="checkbox" id="fuzzy-chars" checked> 形近字容错（暝/瞑 等细字混淆时防漏检）</label>
+      <label class="toggle"><input type="checkbox" id="skip-similar" checked> 相似帧跳过（字幕静止时大幅提速）</label>
+      <label class="toggle"><input type="checkbox" id="recursive" checked> 递归扫描子目录</label>
+      <label class="toggle"><input type="checkbox" id="fast-copy"> 快速模式（流复制，对齐关键帧不精确）</label>
+      <label class="toggle"><input type="checkbox" id="merged-output"> 额外输出合并版（合并成果.mp4）</label>
+      <label class="toggle"><input type="checkbox" id="debug"> 调试模式（逐帧记录 OCR 结果到 logs/debug/）</label>
+    </details>
+
+    <button class="btn primary wide" id="start-btn" disabled>开始剪辑</button>
+  </section>
+
+  <section>
+    <h2>引擎控制</h2>
+    <div class="hint" id="engine-status">未加载</div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="unload-btn" disabled>卸载模型</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>事件日志</h2>
+    <div id="eventlog"></div>
+  </section>
+</aside>
+
+<main>
+  <div class="card">
+    <h3>本机性能 <span style="color:var(--muted);font-weight:normal;font-size:12px" id="perf-note"></span></h3>
+    <div class="monitor-grid">
+      <div class="metric"><div class="label">CPU</div><div class="value" id="m-cpu">--%</div><canvas id="s-cpu"></canvas></div>
+      <div class="metric"><div class="label">内存</div><div class="value" id="m-ram">--%</div><canvas id="s-ram"></canvas></div>
+      <div class="metric"><div class="label" id="l-gpu">GPU（未检测到）</div><div class="value" id="m-gpu">--%</div><canvas id="s-gpu"></canvas></div>
+    </div>
+    <div id="dev-notes" style="margin-top:10px;color:var(--muted);font-size:12px"></div>
+  </div>
+
+  <div id="jobs-area"><div class="empty">还没有任务 —— 在左侧填写目录和关键词后开始</div></div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const state = { engine: null, device: null, jobs: [], lastJobId: null };
+
+function toast(msg, isErr) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.style.borderColor = isErr ? "var(--err)" : "var(--accent)";
+  t.style.display = "block";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.style.display = "none", 3000);
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, opts && {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts),
+  });
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { msg = (await r.json()).detail || msg; } catch {}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+// ---------- 初始化：设备 + 引擎档位 ----------
+async function init() {
+  state.device = await api("/api/device");
+  const chips = $("dev-chips");
+  chips.innerHTML = "";
+  const items = [
+    [state.device.cpu_name, true],
+    [`RAM ${state.device.ram_total_gb}GB`, true],
+    state.device.gpu_name ? [state.device.gpu_name + " · NVENC ✓", state.device.nvenc_available] : ["无 NVIDIA GPU", false],
+  ];
+  for (const [text, on] of items) {
+    if (!text) continue;
+    const c = document.createElement("span");
+    c.className = "chip" + (on ? " on" : "");
+    c.textContent = text;
+    chips.appendChild(c);
+  }
+  $("dev-notes").innerHTML = state.device.notes.map(n => "· " + n).join("<br>");
+  $("l-gpu").textContent = state.device.gpu_name ? "GPU " + state.device.gpu_name.replace("NVIDIA GeForce ", "") : "GPU（未检测到）";
+
+  await refreshEngine();
+  poll();
+}
+
+async function refreshEngine() {
+  state.engine = await api("/api/engine");
+  const sel = $("ocr-level");
+  sel.innerHTML = "";
+  for (const [k, v] of Object.entries(state.engine.levels)) {
+    const o = document.createElement("option");
+    o.value = k; o.textContent = v.name;
+    sel.appendChild(o);
+  }
+  if (state.engine.stats.level) sel.value = state.engine.stats.level;
+  onLevelChange();
+  const st = state.engine.stats;
+  $("engine-status").textContent = st.loaded
+    ? `${st.level_name} 已加载（${st.load_seconds}s）· 推理 ${st.infer_count} 次 · 均 ${st.avg_infer_ms}ms`
+    : "未加载（任务启动时自动加载）";
+  $("unload-btn").disabled = !st.loaded;
+}
+
+function onLevelChange() {
+  const k = $("ocr-level").value;
+  $("level-note").textContent = state.engine?.levels[k]?.note || "";
+}
+$("ocr-level").addEventListener("change", async () => {
+  onLevelChange();
+  try {
+    await api("/api/engine/load", { level: $("ocr-level").value });
+    toast("模型已切换");
+  } catch (e) { toast("切换失败: " + e.message, true); }
+  refreshEngine();
+});
+$("unload-btn").addEventListener("click", async () => {
+  try { await api("/api/engine/unload", {}); } catch (e) { toast(e.message, true); }
+  refreshEngine();
+});
+
+// ---------- 目录扫描 ----------
+let scanTimer = null;
+$("input-dir").addEventListener("input", () => {
+  clearTimeout(scanTimer);
+  scanTimer = setTimeout(scanDir, 600);
+});
+async function scanDir() {
+  const d = $("input-dir").value.trim();
+  if (!d) { $("scan-hint").textContent = "填写后自动扫描"; return; }
+  try {
+    const { files } = await api(`/api/scan?input_dir=${encodeURIComponent(d)}&recursive=${$("recursive").checked}`);
+    $("scan-hint").textContent = `发现 ${files.length} 个视频 · 共 ${files.reduce((a, f) => a + f.size_mb, 0).toFixed(0)} MB`;
+    $("start-btn").disabled = false;
+  } catch (e) {
+    $("scan-hint").textContent = e.message;
+    $("start-btn").disabled = true;
+  }
+}
+
+// ---------- 提交任务 ----------
+$("start-btn").addEventListener("click", async () => {
+  const kws = $("keywords").value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+  if (!kws.length) return toast("请填写关键词", true);
+  const body = {
+    input_dir: $("input-dir").value.trim(),
+    output_dir: $("output-dir").value.trim(),
+    keywords: kws,
+    ocr_level: $("ocr-level").value,
+    sample_fps: parseFloat($("sample-fps").value) || 2,
+    margin: parseFloat($("margin").value) || 0,
+    merge_gap: parseFloat($("merge-gap").value) || 0,
+    use_regex: $("match-mode").value === "regex",
+    ignore_case: $("ignore-case").checked,
+    fuzzy_chars: $("fuzzy-chars").checked,
+    skip_similar: $("skip-similar").checked,
+    recursive: $("recursive").checked,
+    fast_copy: $("fast-copy").checked,
+    merged_output: $("merged-output").checked,
+    debug: $("debug").checked,
+  };
+  if (!body.input_dir || !body.output_dir) return toast("请填写输入/输出目录", true);
+  try {
+    const { job_id } = await api("/api/jobs", body);
+    state.lastJobId = job_id;
+    toast("任务已提交");
+  } catch (e) { toast("提交失败: " + e.message, true); }
+});
+
+// ---------- 任务渲染 ----------
+function renderJobs() {
+  const area = $("jobs-area");
+  const jobs = state.jobs;
+  if (!jobs.length) {
+    area.innerHTML = '<div class="empty">还没有任务 —— 在左侧填写目录和关键词后开始</div>';
+    return;
+  }
+  // 最新在前
+  const sorted = [...jobs].sort((a, b) => b.created_at - a.created_at);
+  area.innerHTML = sorted.map(renderJob).join("");
+  for (const j of jobs) {
+    const btn = document.querySelector(`[data-cancel="${j.id}"]`);
+    if (btn) btn.onclick = () => api(`/api/jobs/${j.id}/cancel`, {}).catch(e => toast(e.message, true));
+  }
+}
+
+function renderJob(j) {
+  const pct = Math.round(j.progress * 100);
+  const files = j.files.map(f => `
+    <div class="fileitem">
+      <span class="status ${f.status}">${statusText(f.status)}</span>
+      <span class="name" title="${f.path}">${f.name}</span>
+      <span class="ocr-text">${f.status === "processing" && f.last_text ? "OCR: " + esc(f.last_text) : ""}</span>
+      <span style="color:var(--muted)">${f.duration ? fmtTime(f.scanned) + " / " + fmtTime(f.duration) : ""}</span>
+      <span title="OCR ${f.ocr_frames} 次 · 相似跳过 ${f.skip_frames} 次">⚡${f.ocr_frames}/${f.skip_frames}</span>
+      <span style="color:${f.hit_frames ? "var(--accent2)" : "var(--muted)"}" title="命中关键词的采样帧数（扫描中实时更新）">命中 ${f.hit_frames} 帧</span>
+      <span style="color:var(--accent2)">${f.segments.length ? f.segments.length + "段" : ""}</span>
+    </div>` +
+    (f.segments.length ? `<table class="seg-table">` +
+      f.segments.map(s => `<tr><td>${s.start}s – ${s.end}s</td><td>${s.duration}s</td><td>${esc(s.keywords.join(","))}</td><td style="color:var(--muted)">${esc((s.texts[0]||"").slice(0,60))}</td><td>${esc(s.clip)}</td></tr>`).join("") +
+      `</table>` : "")
+  ).join("");
+
+  const merged = j.merged_file ? `<div style="color:var(--accent2);margin-top:8px">合并版: ${esc(j.merged_file)}</div>` : "";
+  const cancelBtn = (j.status === "queued" || j.status === "running")
+    ? `<button class="btn danger" data-cancel="${j.id}">取消</button>` : "";
+  const err = j.error ? `<div style="color:var(--err);margin-top:8px">${esc(j.error)}</div>` : "";
+
+  return `<div class="card">
+    <h3><span class="status ${j.status}">${statusText(j.status)}</span>
+      关键词「${esc(j.params.keywords.join(", "))}」· ${j.params.ocr_level === "fast" ? "轻量" : "高精度"}档
+      · 采样 ${j.params.sample_fps}fps · 余量 ${j.params.margin}s
+      <span style="margin-left:auto">${cancelBtn}</span></h3>
+    <div class="progressbar"><div style="width:${pct}%"></div></div>
+    <div style="color:var(--muted);font-size:12px">总进度 ${pct}% · 实时命中 ${j.live_hits} 帧 · 最终片段 ${j.total_segments} 段</div>
+    ${merged}${err}
+    <div class="filelist">${files}</div>
+  </div>`;
+}
+
+function statusText(s) {
+  return { queued: "排队中", running: "运行中", done: "完成", failed: "失败",
+           cancelled: "已取消", pending: "待处理", processing: "处理中",
+           skipped: "跳过" }[s] || s;
+}
+function fmtTime(sec) {
+  sec = Math.max(0, Math.round(sec));
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+// ---------- 监控 sparkline ----------
+function drawSpark(canvas, data, color) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width = canvas.offsetWidth * 2;
+  const h = canvas.height = 72;
+  ctx.clearRect(0, 0, w, h);
+  if (!data.length) return;
+  const max = Math.max(100, ...data);
+  ctx.beginPath();
+  data.forEach((v, i) => {
+    const x = i / Math.max(1, data.length - 1) * w;
+    const y = h - v / max * h;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.stroke();
+}
+
+// ---------- 轮询 ----------
+let tick = 0;
+async function poll() {
+  try {
+    if (tick % 2 === 0) {
+      const [jobs, mon, ev] = await Promise.all([
+        api("/api/jobs"), api("/api/monitor"), api("/api/events?limit=60"),
+      ]);
+      state.jobs = jobs.jobs;
+      renderJobs();
+      $("m-cpu").textContent = mon.cpu_percent.toFixed(0) + "%";
+      $("m-ram").textContent = mon.ram_percent.toFixed(0) + "% " + mon.ram_used_gb.toFixed(1) + "/" + mon.ram_total_gb.toFixed(0) + "G";
+      $("m-gpu").textContent = mon.has_gpu ? mon.gpu_util.toFixed(0) + "% " + mon.gpu_mem_used_gb.toFixed(1) + "/" + mon.gpu_mem_total_gb.toFixed(1) + "G" : "--";
+      drawSpark($("s-cpu"), mon.hist_cpu, "#4f8cff");
+      drawSpark($("s-ram"), mon.hist_ram, "#f0b429");
+      drawSpark($("s-gpu"), mon.hist_gpu, "#3ddc97");
+      $("perf-note").textContent = mon.has_gpu ? `GPU ${mon.gpu_temp}°C` : "";
+
+      const logEl = $("eventlog");
+      const nearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+      logEl.innerHTML = ev.events.map(e =>
+        `<div class="ev ${e.level}"><span class="t">${e.time}</span><span>${esc(e.message)}</span></div>`).join("");
+      if (nearBottom) logEl.scrollTop = logEl.scrollHeight;
+    }
+    if (tick % 10 === 0) refreshEngine();
+  } catch (e) { /* 服务重启间隙忽略 */ }
+  tick++;
+  setTimeout(poll, 1000);
+}
+
+init();
+</script>
+</body>
+</html>
