@@ -11,14 +11,30 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-MODELS_DIR = ROOT_DIR / "models"
-LOGS_DIR = ROOT_DIR / "logs"
-WEB_DIR = ROOT_DIR / "web"
+
+def _resolve_dirs() -> tuple[Path, Path]:
+    """解析 (资源根, 数据根)。
+
+    源码运行：两者都是项目根目录。
+    PyInstaller 打包运行：只读资源（web/models）随包在 sys._MEIPASS 内，
+    而 logs 这类可变数据放到 exe 同级，方便用户查看与清理。
+    """
+    if getattr(sys, "frozen", False):
+        bundle = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        return bundle, Path(sys.executable).resolve().parent
+    root = Path(__file__).resolve().parent.parent
+    return root, root
+
+
+RES_DIR, DATA_DIR = _resolve_dirs()
+MODELS_DIR = RES_DIR / "models"
+WEB_DIR = RES_DIR / "web"
+LOGS_DIR = DATA_DIR / "logs"
 
 VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm", ".ts", ".m4v", ".wmv", ".mpg", ".mpeg", ".rmvb"}
 

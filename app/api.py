@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -13,6 +12,7 @@ from pydantic import BaseModel, Field
 from .config import (
     DEFAULT_OCR_LEVEL,
     OCR_LEVELS,
+    WEB_DIR,
     get_device,
     ocr_level_ready,
 )
@@ -164,7 +164,7 @@ def create_app() -> FastAPI:
 
     # ---------- 前端 ----------
 
-    web_dir = Path(__file__).resolve().parent.parent / "web"
+    web_dir = WEB_DIR
     if web_dir.is_dir():
         app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
     else:  # web 目录缺失时仍提供 API
