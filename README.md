@@ -6,10 +6,10 @@
 
 **基于 OCR 的智能素材剪辑器**
 
-*像梭子穿过经纬 —— 给它一个目录和几个关键词，它逐帧认字，把所有出现过这些字的片段剪出来*
+*像梭子穿过经纬 —— 给它一个目录和几个关键词，它逐帧认字，把所有出现过这些字的片段剪出来，再按时间轴织成一部成片*
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-00838F.svg?style=flat-square&logo=gnu&logoColor=white)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-3DDC97.svg?style=flat-square)](https://github.com/SrQingChen/QingSuo/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-3DDC97.svg?style=flat-square)](https://github.com/SrQingChen/QingSuo/releases)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?style=flat-square&logo=python&logoColor=white)](#环境要求)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6.svg?style=flat-square&logo=windows11&logoColor=white)](#环境要求)
 [![Stars](https://img.shields.io/github/stars/SrQingChen/QingSuo?style=flat-square&color=00838F&label=Stars)](https://github.com/SrQingChen/QingSuo/stargazers)
@@ -18,6 +18,7 @@
 [![OCR](https://img.shields.io/badge/OCR-PP--OCRv5-0E9F8F.svg?style=flat-square)]()
 [![Runtime](https://img.shields.io/badge/Runtime-ONNX%20Runtime-005CED.svg?style=flat-square&logo=onnx&logoColor=white)]()
 [![加速](https://img.shields.io/badge/%E5%8A%A0%E9%80%9F-NVDEC%20%7C%20NVENC-76B900.svg?style=flat-square&logo=nvidia&logoColor=white)](#硬件加速)
+[![FFmpeg](https://img.shields.io/badge/FFmpeg-required-007AA8.svg?style=flat-square&logo=ffmpeg&logoColor=white)](#环境要求)
 [![Backend](https://img.shields.io/badge/Backend-FastAPI-009688.svg?style=flat-square&logo=fastapi&logoColor=white)](#api)
 [![前端](https://img.shields.io/badge/%E5%89%8D%E7%AB%AF-%E5%8E%9F%E7%94%9F%E5%8D%95%E9%A1%B5-4F8CFF.svg?style=flat-square)]()
 
@@ -30,9 +31,11 @@
 你需要一个视频里**所有提到了「锁暝」的片段**。手动做法是：拖着进度条从头看到尾，记下时间点，
 再一个个裁出来——60 分钟成片，半小时就这么没了。
 
-青梭把这件事变成一次点击：**给它一个目录、几个关键词，它逐帧认字，把命中片段全剪出来。**
+青梭把这件事变成一次点击：**给它一个目录、几个关键词，它逐帧认字，把命中片段全剪出来，
+默认还会把所有片段按视频时间轴顺序自动织成一部完整成片**——散片段？拼好校验通过后自动清理，
+目录里只剩那一个你真正想要的文件。
 
-抽帧 → OCR → 关键词匹配 → 命中帧合并成段 → 前后留余量 → 帧精确导出。
+抽帧 → OCR → 关键词匹配 → 命中帧合并成段 → 前后留余量 → 帧精确导出 → **按时间轴拼成成片**。
 关键词**直接写在画面上**也照样命中——它认的是像素，不是音轨，所以字幕、贴片、标题卡、
 水印里的字**一视同仁**。
 
@@ -46,7 +49,10 @@
 
 | | 能力 | 实现要点 |
 |---|---|---|
-| 🎯 | **字幕定位剪辑** | 命中帧按空档合并成段（`merge_gap`），前后扩余量（`margin`，默认 0.5s）并按**半个采样周期**补偿帧时间戳误差，重编码输出保证帧精确 |
+| 🎬 | **成片模式（默认开）** | 所有片段按视频时间轴自动拼成单一成片（`成片_关键词_时间戳.mp4`）；**校验通过后才清理散片段**，失败则原样保留。关闭即输出散片段 |
+| 🧵 | **严格时间轴顺序** | 多视频按**自然顺序**排（`v_2` 在 `v_10` 前，字典序会反过来）、段内按时间升序，合并前**显式重排序**——成片顺序与处理顺序彻底解耦 |
+| 🎯 | **字幕定位剪辑** | 命中帧按空档合并成段（`merge_gap` 自动放宽到 ≥ 采样间隔，防止低频采样把连续命中切碎），前后扩余量（`margin`）并按**半个实际采样周期**补偿帧时间戳误差，重编码输出保证帧精确 |
+| 🛡️ | **合并三重保险** | 片段流参数一致才走流拼接（快、无损）；混合分辨率/编码/音轨时自动在滤镜图内统一画幅（等比缩放+黑边）、SAR、帧率与音频后重编码（超长自动分批）；成片须通过 ffprobe 时长校验（≥98% 片段总长）才允许清理散片段 |
 | 🔡 | **生僻字完整覆盖** | PP-OCRv5 字典 **36775** 字。PP-OCRv4 只有 13245 字、**不含「暝」**，会把「锁暝」认成「锁的」——选 v5 是刻意决策，不是版本迷信 |
 | 🎚️ | **双档模型** | 轻量（mobile，~21MB）/ 高精度（server，~165MB）。换档 = 先卸载再加载，同一时刻只驻留一档，绝不共存 |
 | ♻️ | **相似帧跳过** | 64×64 灰度签名**双重判定**，字幕静止时跳过推理；典型字幕场景省 50–80% 推理量且不影响结果 |
@@ -55,7 +61,7 @@
 | ⚡ | **硬件加速** | 解码 NVDEC（失败自动回退软解）、编码 NVENC（用 0.2s 黑块**真实试编**探测，而不是只看编码器列表——两者经常不一致） |
 | 📈 | **零开销监控** | 后台线程 2s 采样 psutil + nvidia-smi，API 只读内存缓存；前端实时曲线 |
 | 🔬 | **逐帧可追溯** | 调试模式逐帧落盘 `logs/debug/{任务id}/{视频名}.jsonl`：时间戳 / 是否跳过 / 推理毫秒 / 识别文本 / 命中关键词 |
-| 🧯 | **绝不静默回退** | GPU→CPU 回退、模型缺失、档位冲突全部走事件流明示；"有命中帧却没生成片段"会**显式告警**而非静默返回空 |
+| 🧯 | **绝不静默失败** | GPU→CPU 回退、模型缺失、档位冲突、合并异常全部走事件流明示；"有命中帧却没生成片段"会**显式告警**而非静默返回空；合并失败时散片段与半成品绝不清、不留 |
 
 ---
 
@@ -63,9 +69,12 @@
 
 ### 0. 免安装版（Windows，不想配环境走这条）
 
-[**⬇️ 下载 QingSuo-1.0.0-win64.zip**](https://github.com/SrQingChen/QingSuo/releases/latest)（约 265MB）
+[**⬇️ 下载 QingSuo-win64.zip**](https://github.com/SrQingChen/QingSuo/releases/latest)（约 265MB）
 ——解压后双击 `QingSuo.exe` 即用，**已内置两档 OCR 模型，无需 Python 环境**；
 仍需 FFmpeg 在 `PATH` 中（见下）。想从源码运行见第 1 步起。
+
+> 📌 当前免安装版为 1.0.0：**尚不含成片模式与时间轴排序修复**（1.1.0 特性）。
+> 急用这两个特性请走源码运行，或按[自行打包](#自行打包)一节用最新代码构建。
 
 ### 环境要求
 
@@ -109,9 +118,13 @@ python main.py --port 9000 --no-browser
 
 ### 4. 使用
 
-1. **输入目录**——支持递归子目录 2. **输出目录** 3. **匹配关键词**——逗号分隔，任一命中即剪
+1. **输入目录**——支持递归子目录（多视频按**自然顺序**处理：`v_2` 在 `v_10` 前；递归时先本目录文件、再按序进子目录） 2. **输出目录** 3. **匹配关键词**——逗号分隔，任一命中即剪
 4. **选 OCR 档位**——先用轻量档试，小字/低对比度不理想再换高精度
-5. **开始剪辑**——实时看进度、命中帧数与逐帧识别文本
+5. **成片模式**（默认开）——所有片段按时间轴拼成一部 `成片_关键词_时间戳.mp4`，校验通过后自动清理散片段；关掉它就只要散片段
+6. **开始剪辑**——实时看进度、命中帧数与逐帧识别文本
+
+> 💡 参数经验：`margin`（余量）建议 **≥ 采样间隔**（如每 2 秒采一帧就设 ≥2s）；
+> `merge_gap` 小于采样间隔时会被自动放宽到采样间隔（同一次出现的相邻命中帧天然相隔一个采样周期）。
 
 ---
 
@@ -125,9 +138,11 @@ flowchart LR
     C -->|"变化 或 距上次 ≥2s"| E["🔍 PP-OCRv5 推理<br/>ONNX Runtime · CPU 多线程"]
     D --> F["🔑 关键词匹配<br/>形近字归一"]
     E --> F
-    F --> G["🧩 命中帧合并成段<br/>并按空档合并 + 前后扩余量"]
+    F --> G["🧩 命中帧合并成段<br/>空档合并 + 前后扩余量"]
     G --> H["✂️ 精确剪辑<br/>NVENC / libx264"]
-    H --> I["🎬 逐段片段<br/>可选合并成片"]
+    H --> I{"输出模式"}
+    I -->|"成片模式（默认）"| J["🧵 按时间轴拼接成片<br/>校验通过后清理散片段"]
+    I -->|"散片段模式"| K["🎬 逐段片段"]
 ```
 
 ---
@@ -206,12 +221,12 @@ app/
 ├── events.py          # 环形事件日志（内存 + 文件双写）
 ├── monitor.py         # 性能监控采样线程
 ├── ocr/engine.py      # OCREngine：懒加载 / 卸载 / RLock / busy 计数互斥
-├── jobs.py            # JobRunner：后台队列、进度、取消、相似帧跳过
+├── jobs.py            # JobRunner：后台队列、进度、取消、相似帧跳过、成片模式与清理护栏
 ├── pipeline/
-│   ├── scanner.py     # 目录扫描
+│   ├── scanner.py     # 目录扫描（数字感知自然排序）
 │   ├── sampler.py     # ffmpeg 抽帧（NVDEC + rawvideo 管道 → numpy）
-│   ├── matcher.py     # 关键词匹配 + 形近字容错 + 片段合并
-│   └── clipper.py     # NVENC 剪辑导出 + concat 合并
+│   ├── matcher.py     # 关键词匹配 + 形近字容错 + 片段合并（半采样周期补偿）
+│   └── clipper.py     # NVENC 剪辑导出 + 智能合并（流拼接/滤镜统一重编码 + 成片校验）
 ├── api.py             # FastAPI 路由
 main.py                # 启动入口
 web/index.html         # 原生单页前端（零构建、零依赖）
@@ -237,18 +252,21 @@ models/                # PP-OCRv5 ONNX 权重
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `ocr_level` | `fast` | `fast` 轻量 / `accurate` 高精度 |
-| `sample_fps` | `2.0` | 抽帧频率（0.2–10），越高定位越准、耗时越长 |
-| `margin` | `0.5` | 片段前后保留余量（秒，0–30） |
-| `merge_gap` | `1.0` | 命中帧间隔小于此值视为同一段（秒，0–60） |
+| `sample_fps` | `2.0` | 抽帧频率（0.2–10），越高定位越准、耗时越长；前端会显示等效的"每 N 秒一帧" |
+| `margin` | `0.5` | 片段前后保留余量（秒，0–30），建议 ≥ 采样间隔 |
+| `merge_gap` | `1.0` | 命中帧间隔小于此值视为同一段（秒，0–60）；小于采样间隔时自动放宽为采样间隔 |
 | `fuzzy_chars` | `true` | 形近字容错（暝↔瞑 等） |
 | `ignore_case` | `true` | 忽略英文大小写 |
 | `use_regex` | `false` | 关键词按正则表达式解释 |
 | `skip_similar` | `true` | 相似帧跳过（字幕静止时省推理） |
 | `force_ocr_every` | `2.0` | 强制重识别间隔（秒），防漏检兜底 |
-| `fast_copy` | `false` | 快速模式：流复制，秒级完成但**只能落在关键帧上**（非帧精确） |
-| `merged_output` | `false` | 额外输出一个把所有片段拼接的合并成片 |
-| `recursive` | `true` | 递归扫描子目录 |
+| `fast_copy` | `false` | 快速模式：流复制，秒级完成但**只能落在关键帧上**（非帧精确）；成片模式下无音轨来源会自动忽略此开关（需重编码补静音轨） |
+| `merged_output` | `true` | **成片模式**：按时间轴拼接为单一成片（`成片_关键词_时间戳.mp4`），校验通过后自动清理散片段；`false` 则只输出散片段 |
+| `recursive` | `true` | 递归扫描子目录（文件按自然顺序：数字感知、大小写不敏感） |
 | `debug` | `false` | 逐帧调试日志落盘 |
+
+> ⚠️ **1.1.0 破坏性变更**：旧版 `merged_output=true` 表示"额外多输出一个合并版、散片段保留"；
+> 1.1.0 起改为**成片模式**——散片段在校验通过后被自动清理，目录里只留成片。需要散片段请显式关闭。
 
 ---
 

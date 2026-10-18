@@ -35,7 +35,7 @@ class CreateJobRequest(BaseModel):
     ignore_case: bool = True
     fuzzy_chars: bool = True
     fast_copy: bool = False
-    merged_output: bool = False
+    merged_output: bool = True
     skip_similar: bool = True
     recursive: bool = True
     debug: bool = False

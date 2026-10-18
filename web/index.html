@@ -135,6 +135,7 @@ main { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: colu
         <div><label>采样帧率 (fps)</label><input type="number" id="sample-fps" value="2" min="0.2" max="10" step="0.5"></div>
         <div><label>前后余量 (秒)</label><input type="number" id="margin" value="0.5" min="0" step="0.1"></div>
       </div>
+      <div class="hint" id="fps-hint"></div>
       <div class="row">
         <div><label>合并间隔 (秒)</label><input type="number" id="merge-gap" value="1" min="0" step="0.5"></div>
         <div><label>匹配方式</label>
@@ -146,9 +147,11 @@ main { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: colu
       <label class="toggle"><input type="checkbox" id="skip-similar" checked> 相似帧跳过（字幕静止时大幅提速）</label>
       <label class="toggle"><input type="checkbox" id="recursive" checked> 递归扫描子目录</label>
       <label class="toggle"><input type="checkbox" id="fast-copy"> 快速模式（流复制，对齐关键帧不精确）</label>
-      <label class="toggle"><input type="checkbox" id="merged-output"> 额外输出合并版（合并成果.mp4）</label>
       <label class="toggle"><input type="checkbox" id="debug"> 调试模式（逐帧记录 OCR 结果到 logs/debug/）</label>
     </details>
+
+    <label class="toggle" style="margin-top:12px"><input type="checkbox" id="merged-output" checked> <b>成片模式</b>：按时间轴自动拼接完整视频</label>
+    <div class="hint">开启：所有片段按视频时间轴顺序拼成一份成片，校验通过后自动清理散片段；关闭：只输出散片段</div>
 
     <button class="btn primary wide" id="start-btn" disabled>开始剪辑</button>
   </section>
@@ -289,6 +292,15 @@ async function scanDir() {
 }
 
 // ---------- 提交任务 ----------
+function updateFpsHint() {
+  const fps = parseFloat($("sample-fps").value);
+  $("fps-hint").textContent = fps > 0
+    ? `≈ 每 ${(1 / fps).toFixed(1)} 秒采样一帧；余量建议不小于采样间隔`
+    : "";
+}
+$("sample-fps").addEventListener("input", updateFpsHint);
+updateFpsHint();
+
 $("start-btn").addEventListener("click", async () => {
   const kws = $("keywords").value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
   if (!kws.length) return toast("请填写关键词", true);
@@ -351,7 +363,9 @@ function renderJob(j) {
       `</table>` : "")
   ).join("");
 
-  const merged = j.merged_file ? `<div style="color:var(--accent2);margin-top:8px">合并版: ${esc(j.merged_file)}</div>` : "";
+  const merged = j.merged_file ? `<div style="color:var(--accent2);margin-top:8px">成片: ${esc(j.merged_file)}${j.clips_cleaned ? "（散片段已自动清理）" : ""}</div>` : "";
+  const noHit = (j.status === "done" && j.params.merged_output && !j.merged_file && j.total_segments === 0)
+    ? `<div style="color:var(--muted);margin-top:8px">未命中关键词，无成片输出</div>` : "";
   const cancelBtn = (j.status === "queued" || j.status === "running")
     ? `<button class="btn danger" data-cancel="${j.id}">取消</button>` : "";
   const err = j.error ? `<div style="color:var(--err);margin-top:8px">${esc(j.error)}</div>` : "";
@@ -363,7 +377,7 @@ function renderJob(j) {
       <span style="margin-left:auto">${cancelBtn}</span></h3>
     <div class="progressbar"><div style="width:${pct}%"></div></div>
     <div style="color:var(--muted);font-size:12px">总进度 ${pct}% · 实时命中 ${j.live_hits} 帧 · 最终片段 ${j.total_segments} 段</div>
-    ${merged}${err}
+    ${merged}${noHit}${err}
     <div class="filelist">${files}</div>
   </div>`;
 }

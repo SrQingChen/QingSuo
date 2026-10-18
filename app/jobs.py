@@ -14,6 +14,7 @@ import re
 import threading
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -73,7 +74,7 @@ class JobParams:
     ignore_case: bool = True
     fuzzy_chars: bool = True
     fast_copy: bool = False
-    merged_output: bool = False
+    merged_output: bool = True      # 成片模式：按时间轴拼成单个视频并清理散片段
     skip_similar: bool = True
     recursive: bool = True
     # 相似跳过的强制兜底间隔：距上次真实 OCR 超过该秒数必定重识别，
@@ -119,6 +120,7 @@ class Job:
     finished_at: float = 0.0
     files: list[FileProgress] = field(default_factory=list)
     merged_file: str = ""
+    clips_cleaned: bool = False     # 成片模式下散片段是否已自动清理
     error: str = ""
 
     def to_dict(self) -> dict:
@@ -134,6 +136,7 @@ class Job:
             "progress": round(total_scan / total_dur, 3) if total_dur > 0 else 0.0,
             "files": [f.to_dict() for f in self.files],
             "merged_file": self.merged_file,
+            "clips_cleaned": self.clips_cleaned,
             "error": self.error,
             "total_segments": sum(len(f.segments) for f in self.files),
             # 实时命中（扫描过程中持续增长；segments 要等剪辑完成才统计）
@@ -248,13 +251,45 @@ class JobRunner:
             clipper = Clipper(use_nvenc=dev.nvenc_available)
             match = M.build_matcher(p.keywords, p.use_regex, p.ignore_case, p.fuzzy_chars)
 
-            all_clips: list[str] = []
-            for fp in job.files:
+            # 同一次出现的相邻命中帧天然相距一个采样间隔；merge_gap 小于它
+            # 只会把连续命中切成碎片（如 2s 采样 + 默认 1s gap = 每个命中帧
+            # 一段，全靠扩余量后的重叠回并补救），这里直接放宽到位。
+            interval = 1.0 / p.sample_fps if p.sample_fps > 0 else 0.5
+            merge_gap = p.merge_gap
+            if interval > merge_gap:
+                merge_gap = interval
+                self.log.add(
+                    "jobs",
+                    f"采样间隔 {interval:.2f}s 大于合并间隔 {p.merge_gap:.2f}s，"
+                    f"已自动放宽合并间隔为 {interval:.2f}s", "info")
+
+            # 递归扫描时不同子目录可能同名：重名文件的片段前缀加文件序号
+            # 消歧，并确保不与任何真实 stem 或其他消歧前缀撞车（撞名会让
+            # 两个源的片段互相覆盖且无告警）
+            stems = [Path(v["path"]).stem for v in videos]
+            stem_counts = Counter(stems)
+            used: set[str] = set(stems)
+            prefixes: list[str] = []
+            for idx, stem in enumerate(stems):
+                if stem_counts[stem] > 1:
+                    cand = f"{stem}_{idx:02d}"
+                    while cand in used:
+                        cand += "_"
+                    used.add(cand)
+                    prefixes.append(cand)
+                else:
+                    prefixes.append(stem)
+
+            # (文件序号, 段起始, 段时长, 片段路径)。合并前显式按时间轴排序，
+            # 让成片顺序与处理顺序彻底解耦——即使未来引入并行处理也不受影响。
+            all_clips: list[tuple[int, float, float, str]] = []
+            for file_index, fp in enumerate(job.files):
                 if self._cancelled(job):
                     raise _JobCancelled()
                 fp.status = "processing"
                 clips = self._process_one(
-                    job, fp, sampler, match, clipper, all_clips)
+                    job, fp, file_index, prefixes[file_index], merge_gap,
+                    interval, sampler, match, clipper, all_clips)
                 fp.status = "done"
                 fp.last_text = ""
                 self.log.add(
@@ -266,11 +301,21 @@ class JobRunner:
             if p.merged_output and all_clips:
                 if self._cancelled(job):
                     raise _JobCancelled()
-                merged = str(Path(p.output_dir) / "合并成果.mp4")
-                self.log.add("jobs", f"合并 {len(all_clips)} 个片段 …")
-                clipper.concat(all_clips, merged)
+                ordered = sorted(all_clips, key=lambda c: (c[0], c[1]))
+                paths = [c[3] for c in ordered]
+                total_dur = sum(c[2] for c in ordered)
+                merged = str(Path(p.output_dir) / _merged_name(job))
+                self.log.add(
+                    "jobs",
+                    f"成片模式：按时间轴合并 {len(paths)} 个片段"
+                    f"（共 {total_dur:.1f}s）…")
+                path_used = clipper.concat_smart(paths, merged, total_dur)
                 job.merged_file = merged
-                self.log.add("jobs", f"合并完成 → {merged}", "success")
+                self.log.add(
+                    "jobs",
+                    f"合并完成（{'流复制拼接' if path_used == 'copy' else '参数统一后重编码拼接'}）"
+                    f" → {merged}", "success")
+                self._cleanup_clips(job, paths)
 
             job.status = "done"
             job.finished_at = time.time()
@@ -297,8 +342,9 @@ class JobRunner:
                 self._cancel_flags.pop(job.id, None)
 
     def _process_one(
-        self, job, fp: FileProgress, sampler, match, clipper,
-        all_clips: list[str],
+        self, job, fp: FileProgress, file_index: int, prefix: str,
+        merge_gap: float, interval: float, sampler, match, clipper,
+        all_clips: list[tuple[int, float, float, str]],
     ) -> list[str]:
         p = job.params
         # 读取时长（进度分母）
@@ -398,9 +444,10 @@ class JobRunner:
 
         segments = M.find_segments(
             frame_results,
-            merge_gap=p.merge_gap,
+            merge_gap=merge_gap,
             margin=p.margin,
             duration=fp.duration,
+            default_step=interval,
         )
         for seg in segments:
             self.log.add(
@@ -412,19 +459,28 @@ class JobRunner:
             self.log.add(
                 "jobs",
                 f"{fp.name}: 警告：{fp.hit_frames} 个命中帧未生成任何片段"
-                f"（merge_gap={p.merge_gap}），请检查参数",
+                f"（merge_gap={merge_gap}），请检查参数",
                 "warn")
 
-        stem = Path(fp.path).stem
+        stem = prefix
         out_dir = Path(p.output_dir)
+        warned_silent = False
         for i, seg in enumerate(segments, 1):
             if self._cancelled(job):
                 raise _JobCancelled()
             clip_name = f"{stem}_{i:02d}_{seg.start:.1f}s-{seg.end:.1f}s.mp4"
             dst = str(out_dir / clip_name)
-            clipper.clip(fp.path, seg.start, seg.end, dst, fast_copy=p.fast_copy)
+            mode = clipper.clip(
+                fp.path, seg.start, seg.end, dst,
+                fast_copy=p.fast_copy, ensure_audio=p.merged_output)
+            if mode == "reenc_silent" and p.fast_copy and not warned_silent:
+                warned_silent = True
+                self.log.add(
+                    "jobs",
+                    f"{fp.name}: 源无音轨，成片模式下该文件的片段忽略快速模式，"
+                    f"重编码并补静音轨", "info")
             fp.clip_paths.append(dst)
-            all_clips.append(dst)
+            all_clips.append((file_index, seg.start, seg.end - seg.start, dst))
             fp.segments.append({
                 "start": round(seg.start, 2),
                 "end": round(seg.end, 2),
@@ -434,6 +490,59 @@ class JobRunner:
                 "clip": clip_name,
             })
         return fp.clip_paths
+
+
+    def _cleanup_clips(self, job: Job, paths: list[str]) -> None:
+        """成片校验通过后清理散片段。
+
+        两道护栏防误删：片段必须位于本任务输出目录内，且修改时间不早于
+        任务开始时间（覆盖"输出目录=输入目录、且恰有源文件名撞上片段命名"
+        的边角情况——clip 的 -y 覆盖会更新 mtime，旧文件不会被碰到）。
+        任何删除失败只告警，绝不让清理影响已有成果。
+        """
+        out_resolved = Path(job.params.output_dir).resolve()
+        removed = skipped = failed = 0
+        for clip in paths:
+            q = Path(clip)
+            try:
+                if not q.is_file() or q.parent.resolve() != out_resolved:
+                    skipped += 1
+                    continue
+                # 5s 容差：FAT/exFAT 的 2 秒 mtime 粒度与小幅时钟偏差
+                # 不应导致刚写出的片段被误保留
+                if q.stat().st_mtime < job.created_at - 5:
+                    skipped += 1
+                    continue
+                q.unlink()
+                removed += 1
+            except OSError:
+                failed += 1
+        # 只有全部清理干净才置位——UI 的"已自动清理"提示必须与事实一致
+        job.clips_cleaned = (removed == len(paths) and not failed and not skipped)
+        # clip_paths 只保留仍存在于磁盘的文件：清空 + clips_cleaned=True
+        # 才能和"本来就没剪出片段"区分开
+        for fp in job.files:
+            fp.clip_paths = [c for c in fp.clip_paths if Path(c).exists()]
+        if removed:
+            self.log.add("jobs", f"已清理 {removed} 个散片段", "info")
+        if skipped:
+            self.log.add(
+                "jobs",
+                f"{skipped} 个片段未通过删除护栏（不在输出目录内或早于任务开始），已保留",
+                "warn")
+        if failed:
+            self.log.add("jobs", f"{failed} 个片段删除失败，已保留", "warn")
+
+
+def _merged_name(job: Job) -> str:
+    """成片文件名：成片_{关键词}_{时间戳}_{任务号}.mp4。
+
+    关键词净化 Windows 非法字符与控制字符（正则模式可能是 `\\d+年` 这类）
+    并截断；时间戳到秒 + 任务号前缀防同秒多任务同名互覆。"""
+    kw = re.sub(r'[\x00-\x1f\\/:*?"<>|\s]+', "",
+                "-".join(job.params.keywords))[:20]
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    return f"成片_{kw or '未命名'}_{ts}_{job.id[:4]}.mp4"
 
 
 class _JobCancelled(Exception):

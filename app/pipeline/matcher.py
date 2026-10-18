@@ -80,11 +80,16 @@ def find_segments(
     merge_gap: float,
     margin: float,
     duration: float,
+    default_step: float = 0.5,
 ) -> list[Segment]:
     """从帧级结果合成最终片段。
 
-    merge_gap: 命中帧之间的最大空档（小于它的两段并为一段）
-    margin:    片段前后保留余量（秒）
+    merge_gap:     命中帧之间的最大空档（小于它的两段并为一段）；
+                   调用方应保证 ≥ 实际采样间隔（同一次出现的相邻命中帧
+                   天然相距一个采样间隔，小于它的 gap 只会把连续命中切碎）
+    margin:        片段前后保留余量（秒）
+    default_step:  采样间隔缺省值（= 1/sample_fps），frame_results 不足
+                   两个不同时间戳时使用
     """
     hits = [fr for fr in frame_results if fr.matched]
     if not hits:
@@ -104,17 +109,15 @@ def find_segments(
     if cur:
         raw.append(cur)
 
-    # 采样间隔的一半：帧 t 命中意味着文字在 [t-Δ, t+Δ] 内存在，
-    # 段边界应向外扩半个采样周期再叠加用户余量，避免切掉首尾帧
-    if frame_results:
-        step = 0.5
-        for i in range(1, len(frame_results)):
-            d = frame_results[i].t - frame_results[i - 1].t
-            if d > 0:
-                step = min(step, d)
-                break
-    else:
-        step = 0.5
+    # 采样间隔：帧 t 命中意味着文字在 [t-Δ, t+Δ] 内存在，
+    # 段边界应向外扩半个采样周期再叠加用户余量，避免切掉首尾帧。
+    # Δ 取实际帧间隔（首个正增量）；无法测定时用调用方给的缺省值。
+    step = default_step
+    for i in range(1, len(frame_results)):
+        d = frame_results[i].t - frame_results[i - 1].t
+        if d > 0:
+            step = d
+            break
 
     # 第二轮：扩余量
     segs = [
